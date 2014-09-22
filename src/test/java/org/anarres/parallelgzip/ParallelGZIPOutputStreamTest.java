@@ -6,17 +6,12 @@ package org.anarres.parallelgzip;
 
 import com.google.common.base.Stopwatch;
 import com.google.common.io.ByteStreams;
-import com.google.common.io.Closer;
-import com.google.common.io.Files;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.io.File;
-import java.io.OutputStream;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
 import java.util.zip.GZIPOutputStream;
 import javax.annotation.Nonnull;
-import org.junit.Ignore;
 import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,13 +33,16 @@ public class ParallelGZIPOutputStreamTest {
         }
     }
 
-    private void testCopy(int len) throws Exception {
+    private void testPerformance(int len) throws Exception {
         Random r = new Random();
         byte[] data = new byte[len];
         r.nextBytes(data);
         LOG.info("Data is " + data.length + " bytes.");
 
         ByteArrayOutputBuffer out = new ByteArrayOutputBuffer();    // Reallocation will occur on the first iteration.
+
+        // availableProcessors does not return hyperthreads; let's assume some overhead.
+        int nthreads = Runtime.getRuntime().availableProcessors() + 1;
 
         for (int i = 0; i < 10; i++) {
             out.reset();
@@ -61,12 +59,12 @@ public class ParallelGZIPOutputStreamTest {
 
             {
                 Stopwatch stopwatch = Stopwatch.createStarted();
-                ParallelGZIPOutputStream gzip = new ParallelGZIPOutputStream(out);
+                ParallelGZIPOutputStream gzip = new ParallelGZIPOutputStream(out, nthreads);
                 gzip.write(data);
                 gzip.close();
                 long elapsed = stopwatch.elapsed(TimeUnit.MILLISECONDS);
                 double perc = orig * 100 / (double) elapsed;
-                LOG.info("Orig=" + orig + "; parallel=" + elapsed + "; perf=" + (int) perc + "%");
+                LOG.info("size=" + data.length + "; serial=" + orig + "; parallel=" + elapsed + "; perf=" + (int) perc + "%");
             }
         }
 
@@ -76,33 +74,48 @@ public class ParallelGZIPOutputStreamTest {
     }
 
     @Test
-    public void testCopy() throws Exception {
-        testCopy(0);
-        testCopy(1);
-        testCopy(4);
-        testCopy(16);
-        testCopy(64 * 1024 - 1);
-        testCopy(64 * 1024);
-        testCopy(64 * 1024 + 1);
-        testCopy(4096 * 1024 + 17);
-        testCopy(16384 * 1024 + 17);
-        // testCopy(1024 * 1024 * 1024 + 17);
+    public void testPerformance() throws Exception {
+        testPerformance(0);
+        testPerformance(1);
+        testPerformance(4);
+        testPerformance(16);
+        testPerformance(64 * 1024 - 1);
+        testPerformance(64 * 1024);
+        testPerformance(64 * 1024 + 1);
+        testPerformance(4096 * 1024 + 17);
+        testPerformance(16384 * 1024 + 17);
+        testPerformance(65536 * 1024 + 17);
     }
 
-    @Ignore
-    @Test
-    public void testCompress() throws Exception {
-        File in = new File("/home/shevek/sda.img");
-        File out = new File("/home/shevek/sda.img.gz");
+    private void testThreads(int nthreads) throws Exception {
+        Random r = new Random();
+        byte[] data = new byte[4 * 1024 * 1024];
+        r.nextBytes(data);
+        LOG.info("Data is " + data.length + " bytes.");
 
-        Closer closer = Closer.create();
-        try {
-            OutputStream os = closer.register(Files.asByteSink(out).openBufferedStream());
-            ParallelGZIPOutputStream gzip = new ParallelGZIPOutputStream(os);
-            Files.asByteSource(in).copyTo(gzip);
-            gzip.close();
-        } finally {
-            closer.close();
+        ByteArrayOutputBuffer out = new ByteArrayOutputBuffer();    // Reallocation will occur on the first iteration.
+
+        for (int i = 0; i < 10; i++) {
+            out.reset();
+            {
+                Stopwatch stopwatch = Stopwatch.createStarted();
+                ParallelGZIPOutputStream gzip = new ParallelGZIPOutputStream(out, nthreads);
+                gzip.write(data);
+                gzip.close();
+                long elapsed = stopwatch.elapsed(TimeUnit.MILLISECONDS);
+                LOG.info("nthreads=" + nthreads + "; parallel=" + elapsed);
+            }
         }
+
+        ParallelGZIPInputStream in = new ParallelGZIPInputStream(out.toInput());
+        byte[] copy = ByteStreams.toByteArray(in);
+        assertArrayEquals(data, copy);
+    }
+
+    @Test
+    public void testThreads() throws Exception {
+        LOG.info("AvailableProcessors = " + Runtime.getRuntime().availableProcessors());
+        for (int i = 1; i < 8; i++)
+            testThreads(i);
     }
 }

@@ -16,15 +16,16 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.zip.CRC32;
 import java.util.zip.Deflater;
 import java.util.zip.DeflaterOutputStream;
+import java.util.zip.GZIPOutputStream;
 import javax.annotation.Nonnegative;
 import javax.annotation.Nonnull;
 
 /**
+ * A multi-threaded version of {@link GZIPOutputStream}.
  *
  * @author shevek
  */
@@ -39,7 +40,7 @@ public class ParallelGZIPOutputStream extends FilterOutputStream {
     }
 
     @Nonnull
-    private static DeflaterOutputStream newDeflaterOutputStream(OutputStream out, Deflater deflater) {
+    private static DeflaterOutputStream newDeflaterOutputStream(@Nonnull OutputStream out, @Nonnull Deflater deflater) {
         return new DeflaterOutputStream(out, deflater, 512, true);
     }
 
@@ -52,7 +53,7 @@ public class ParallelGZIPOutputStream extends FilterOutputStream {
             private final DeflaterOutputStream str = newDeflaterOutputStream(buf, def);
         }
         /** This ThreadLocal avoids the recycling of a lot of memory, causing lumpy performance. */
-        private static ThreadLocal<State> STATE = new ThreadLocal<State>() {
+        private static final ThreadLocal<State> STATE = new ThreadLocal<State>() {
             @Override
             protected State initialValue() {
                 return new State();
@@ -91,18 +92,38 @@ public class ParallelGZIPOutputStream extends FilterOutputStream {
         }
     }
     // TODO: Share, daemonize.
-    private final ExecutorService executor = Executors.newCachedThreadPool();
-    private Block block = new Block(/* 0 */);
-    private final BlockingQueue<Future<byte[]>> emitQueue = new ArrayBlockingQueue<Future<byte[]>>(
-            Runtime.getRuntime().availableProcessors() // Config parameter
-            );
+    private final ExecutorService executor;
+    private final int nthreads;
     private final CRC32 crc = new CRC32();
+    private final BlockingQueue<Future<byte[]>> emitQueue;
+    private Block block = new Block(/* 0 */);
+    /** Used as a sentinel for 'closed'. */
     private int bytesWritten = 0;
 
     // Master thread only
-    public ParallelGZIPOutputStream(@Nonnull OutputStream out) throws IOException {
+    public ParallelGZIPOutputStream(@Nonnull OutputStream out, @Nonnull ExecutorService executor, @Nonnegative int nthreads) throws IOException {
         super(out);
+        this.executor = executor;
+        this.nthreads = nthreads;
+        this.emitQueue = new ArrayBlockingQueue<Future<byte[]>>(nthreads);
         writeHeader();
+    }
+
+    /**
+     * Creates a ParallelGZIPOutputStream
+     * using {@link ParallelGZIPEnvironment#getSharedThreadPool()}.
+     */
+    public ParallelGZIPOutputStream(@Nonnull OutputStream out, @Nonnegative int nthreads) throws IOException {
+        this(out, ParallelGZIPEnvironment.getSharedThreadPool(), nthreads);
+    }
+
+    /**
+     * Creates a ParallelGZIPOutputStream
+     * using {@link ParallelGZIPEnvironment#getSharedThreadPool()}
+     * and {@link Runtime#availableProcessors()}.
+     */
+    public ParallelGZIPOutputStream(@Nonnull OutputStream out) throws IOException {
+        this(out, Runtime.getRuntime().availableProcessors());
     }
 
     /*
@@ -160,7 +181,7 @@ public class ParallelGZIPOutputStream extends FilterOutputStream {
 
     // Master thread only
     private void submit() throws IOException {
-        emitUntil(Runtime.getRuntime().availableProcessors() - 1);
+        emitUntil(nthreads - 1);
         emitQueue.add(executor.submit(block));
         block = new Block(/* block.index + 1 */);
     }
@@ -234,8 +255,6 @@ public class ParallelGZIPOutputStream extends FilterOutputStream {
             bytesWritten = Integer.MIN_VALUE;
             // } else {
             // LOG.warn("Already closed.");
-
-            executor.shutdown();
         }
     }
 }
