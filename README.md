@@ -10,6 +10,13 @@ twice as good as the standard GZIPOutputStream. Currently,
 ParallelGZIPInputStream is a subclass of the standard GZIPInputStream,
 but parallelism may be added in future.
 
+API Documentation
+=================
+
+The [JavaDoc API](http://shevek.github.io/jdiagnostics/docs/javadoc/)
+is available.
+
+
 References
 ==========
 
