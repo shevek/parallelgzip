@@ -13,7 +13,7 @@ but parallelism may be added in future.
 API Documentation
 =================
 
-The [JavaDoc API](http://shevek.github.io/jdiagnostics/docs/javadoc/)
+The [JavaDoc API](http://shevek.github.io/parallelgzip/docs/javadoc/)
 is available.
 
 

@@ -233,6 +233,7 @@ public class ParallelGZIPOutputStream extends FilterOutputStream {
         super.flush();
     }
 
+    // Master thread only
     @Override
     public void close() throws IOException {
         // LOG.info("Closing: bytesWritten=" + bytesWritten);

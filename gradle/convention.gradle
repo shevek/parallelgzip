@@ -1,4 +1,5 @@
 apply plugin: 'java' // Plugin as major conventions, overwrites status
+apply plugin: 'errorprone'
 
 // GRADLE-2087 workaround, perform after java plugin
 status = project.hasProperty('preferredStatus')?project.preferredStatus:(version.contains('SNAPSHOT')?'snapshot':'release')

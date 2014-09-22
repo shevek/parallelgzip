@@ -41,9 +41,6 @@ public class ParallelGZIPOutputStreamTest {
 
         ByteArrayOutputBuffer out = new ByteArrayOutputBuffer();    // Reallocation will occur on the first iteration.
 
-        // availableProcessors does not return hyperthreads; let's assume some overhead.
-        int nthreads = Runtime.getRuntime().availableProcessors() + 1;
-
         for (int i = 0; i < 10; i++) {
             out.reset();
             long orig;
@@ -52,6 +49,7 @@ public class ParallelGZIPOutputStreamTest {
                 GZIPOutputStream gzip = new GZIPOutputStream(out);
                 gzip.write(data);
                 gzip.close();
+                gzip.close();   // Again, for testing.
                 orig = stopwatch.elapsed(TimeUnit.MILLISECONDS);
             }
 
@@ -59,7 +57,7 @@ public class ParallelGZIPOutputStreamTest {
 
             {
                 Stopwatch stopwatch = Stopwatch.createStarted();
-                ParallelGZIPOutputStream gzip = new ParallelGZIPOutputStream(out, nthreads);
+                ParallelGZIPOutputStream gzip = new ParallelGZIPOutputStream(out);
                 gzip.write(data);
                 gzip.close();
                 long elapsed = stopwatch.elapsed(TimeUnit.MILLISECONDS);
