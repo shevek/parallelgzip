@@ -1,3 +1,4 @@
+allprojects {
 	apply plugin: 'license' //nl.javadude.gradle.plugins.license.LicensePlugin
 	license {
 		header rootProject.file('codequality/HEADER')
@@ -5,3 +6,4 @@
 		skipExistingHeaders true
 		ignoreFailures true
 	}
+}
