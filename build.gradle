@@ -3,36 +3,16 @@ ext.githubProjectName = rootProject.name // Change if github project name is not
 group = "org.anarres"
 
 buildscript {
-    repositories {
-        // mavenLocal()
-        mavenCentral() // maven { url 'http://jcenter.bintray.com' }
-    }
     apply from: file('gradle/buildscript.gradle'), to: buildscript 
 }
 
-allprojects {
-    repositories { 
-        // mavenLocal()
-        mavenCentral() // maven { url: 'http://jcenter.bintray.com' }
-    }
-}
-
 apply from: file('gradle/convention.gradle')
-apply from: file('gradle/maven.gradle')
+apply from: file('gradle/github.gradle')
+apply from: file('gradle/nexus.gradle')
 apply from: file('gradle/check.gradle')
 apply from: file('gradle/license.gradle')
-// apply from: file('gradle/release.gradle')
-
-apply plugin: 'info'
 
 dependencies {
-	compile 'com.google.code.findbugs:jsr305:2.0.2'
-	// compile 'net.sf.jopt-simple:jopt-simple:4.6'
-
 	testCompile "org.slf4j:slf4j-api:1.7.7"
-	testCompile 'com.google.guava:guava:17.0'
-	testCompile 'junit:junit:4.11'
-
-	testRuntime "org.slf4j:slf4j-jcl:1.7.7"
-	testRuntime 'commons-logging:commons-logging:1.2'
+	testCompile 'com.google.guava:guava:18.0'
 }
