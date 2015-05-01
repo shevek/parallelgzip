@@ -1,18 +1,30 @@
-// Establish version and status
-ext.githubProjectName = rootProject.name // Change if github project name is not the same as the root project's name
-group = "org.anarres"
-
 buildscript {
     apply from: file('gradle/buildscript.gradle'), to: buildscript 
 }
 
-apply from: file('gradle/convention.gradle')
-apply from: file('gradle/github.gradle')
-apply from: file('gradle/nexus.gradle')
-apply from: file('gradle/check.gradle')
-apply from: file('gradle/license.gradle')
+apply plugin: 'org.anarres.stdproject'
+stdproject {
+}
+
+	group = "org.anarres"
+
+	apply plugin: 'org.anarres.stdmodule'
+	stdmodule {
+		description "A multithreaded implementation of GZIPOutputStream and GZIPInputStream"
+		author id: 'shevek', name: 'Shevek', email: 'github@anarres.org'
+		license 'Apache-2.0'
+	}
+
+	// This can't be made Java 1.5 compatible as the
+	// syncFlush option on DeflaterOutputStream is only
+	// available in 1.7.
+	sourceCompatibility = 1.7
+	animalsniffer {
+		signature = "org.codehaus.mojo.signature:java17:+@signature"
+		skip = true
+	}
 
 dependencies {
-	testCompile "org.slf4j:slf4j-api:1.7.7"
+	compile 'com.google.code.findbugs:jsr305:2.0.2'
 	testCompile 'com.google.guava:guava:18.0'
 }

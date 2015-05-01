@@ -112,6 +112,9 @@ public class ParallelGZIPOutputStream extends FilterOutputStream {
     /**
      * Creates a ParallelGZIPOutputStream
      * using {@link ParallelGZIPEnvironment#getSharedThreadPool()}.
+     *
+     * @param out the eventual output stream for the compressed data.
+     * @throws IOException if it all goes wrong.
      */
     public ParallelGZIPOutputStream(@Nonnull OutputStream out, @Nonnegative int nthreads) throws IOException {
         this(out, ParallelGZIPEnvironment.getSharedThreadPool(), nthreads);
@@ -121,6 +124,9 @@ public class ParallelGZIPOutputStream extends FilterOutputStream {
      * Creates a ParallelGZIPOutputStream
      * using {@link ParallelGZIPEnvironment#getSharedThreadPool()}
      * and {@link Runtime#availableProcessors()}.
+     *
+     * @param out the eventual output stream for the compressed data.
+     * @throws IOException if it all goes wrong.
      */
     public ParallelGZIPOutputStream(@Nonnull OutputStream out) throws IOException {
         this(out, Runtime.getRuntime().availableProcessors());
