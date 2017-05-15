@@ -23,6 +23,7 @@ import java.util.zip.DeflaterOutputStream;
 import java.util.zip.GZIPOutputStream;
 import javax.annotation.Nonnegative;
 import javax.annotation.Nonnull;
+import java.util.ArrayList;
 
 /**
  * A multi-threaded version of {@link GZIPOutputStream}.
@@ -33,6 +34,7 @@ public class ParallelGZIPOutputStream extends FilterOutputStream {
 
     // private static final Logger LOG = LoggerFactory.getLogger(ParallelGZIPOutputStream.class);
     private final static int GZIP_MAGIC = 0x8b1f;
+    private final static int SIZE = 64 * 1024;
 
     @Nonnull
     private static Deflater newDeflater() {
@@ -44,25 +46,30 @@ public class ParallelGZIPOutputStream extends FilterOutputStream {
         return new DeflaterOutputStream(out, deflater, 512, true);
     }
 
-    private static class Block implements Callable<byte[]> {
+    private static class State {
+        private final Deflater def = newDeflater();
+        private final ByteArrayOutputStreamExposed buf = new ByteArrayOutputStreamExposed(SIZE);
+        private final DeflaterOutputStream str = newDeflaterOutputStream(buf, def);
+    }
 
-        private static class State {
+    /** This ThreadLocal avoids the recycling of a lot of memory, causing lumpy performance. */
+    private static final ThreadLocal<State> STATE = ThreadLocal.withInitial(State::new);
 
-            private final Deflater def = newDeflater();
-            private final ByteArrayOutputStream buf = new ByteArrayOutputStream(SIZE);
-            private final DeflaterOutputStream str = newDeflaterOutputStream(buf, def);
+    /* Allow write into byte[] directly */
+    private static class ByteArrayOutputStreamExposed extends ByteArrayOutputStream {
+        public ByteArrayOutputStreamExposed(int size) {
+            super(size);
         }
-        /** This ThreadLocal avoids the recycling of a lot of memory, causing lumpy performance. */
-        private static final ThreadLocal<State> STATE = new ThreadLocal<State>() {
-            @Override
-            protected State initialValue() {
-                return new State();
-            }
-        };
-        public static final int SIZE = 64 * 1024;
+
+        public void writeTo(byte[] buf) throws IOException {
+            System.arraycopy(this.buf, 0, buf, 0, count);
+        }
+    }
+
+    private static class Block implements Callable<Block> {
         // private final int index;
-        private final byte[] in = new byte[SIZE];
-        private int in_length = 0;
+        private final byte[] buf = new byte[SIZE];
+        private int buf_length = 0;
 
         /*
          public Block(@Nonnegative int index) {
@@ -71,7 +78,7 @@ public class ParallelGZIPOutputStream extends FilterOutputStream {
          */
         // Only on worker thread
         @Override
-        public byte[] call() throws Exception {
+        public Block call() throws IOException {
             // LOG.info("Processing " + this + " on " + Thread.currentThread());
 
             State state = STATE.get();
@@ -79,33 +86,39 @@ public class ParallelGZIPOutputStream extends FilterOutputStream {
             // DeflaterOutputStream def = newDeflaterOutputStream(buf);
             state.def.reset();
             state.buf.reset();
-            state.str.write(in, 0, in_length);
+            state.str.write(buf, 0, buf_length);
             state.str.flush();
 
+            buf_length = state.buf.size();
+            assert buf_length <= buf.length;
+            state.buf.writeTo(buf);
+
             // return Arrays.copyOf(in, in_length);
-            return state.buf.toByteArray();
+            return this;
         }
 
         @Override
         public String toString() {
-            return "Block" /* + index */ + "(" + in_length + "/" + in.length + " bytes)";
+            return "Block" /* + index */ + "(" + buf_length + "/" + buf.length + " bytes)";
         }
     }
     // TODO: Share, daemonize.
     private final ExecutorService executor;
     private final int nthreads;
     private final CRC32 crc = new CRC32();
-    private final BlockingQueue<Future<byte[]>> emitQueue;
-    private Block block = new Block(/* 0 */);
+    private final BlockingQueue<Future<Block>> emitQueue;
+    private ObjectArrayList<Block> blocks = new ObjectArrayList<>();  // list of reusable blocks
+    private Block block = new Block();
+    private byte[] blockBuf = block.buf;
     /** Used as a sentinel for 'closed'. */
-    private int bytesWritten = 0;
+    private long bytesWritten = 0;
 
     // Master thread only
     public ParallelGZIPOutputStream(@Nonnull OutputStream out, @Nonnull ExecutorService executor, @Nonnegative int nthreads) throws IOException {
         super(out);
         this.executor = executor;
         this.nthreads = nthreads;
-        this.emitQueue = new ArrayBlockingQueue<Future<byte[]>>(nthreads);
+        this.emitQueue = new ArrayBlockingQueue<>(nthreads);
         writeHeader();
     }
 
@@ -168,16 +181,16 @@ public class ParallelGZIPOutputStream extends FilterOutputStream {
         bytesWritten += len;
         while (len > 0) {
             // assert block.in_length < block.in.length
-            int capacity = block.in.length - block.in_length;
+            int capacity = blockBuf.length - block.buf_length;
             if (len >= capacity) {
-                System.arraycopy(b, off, block.in, block.in_length, capacity);
-                block.in_length += capacity;   // == block.in.length
+                System.arraycopy(b, off, blockBuf, block.buf_length, capacity);
+                block.buf_length += capacity;   // == block.in.length
                 off += capacity;
                 len -= capacity;
                 submit();
             } else {
-                System.arraycopy(b, off, block.in, block.in_length, len);
-                block.in_length += len;
+                System.arraycopy(b, off, blockBuf, block.buf_length, len);
+                block.buf_length += len;
                 // off += len;
                 // len = 0;
                 break;
@@ -189,7 +202,8 @@ public class ParallelGZIPOutputStream extends FilterOutputStream {
     private void submit() throws IOException {
         emitUntil(nthreads - 1);
         emitQueue.add(executor.submit(block));
-        block = new Block(/* block.index + 1 */);
+        block = blocks.isEmpty() ? new Block() : blocks.remove(blocks.size() - 1);
+        blockBuf = block.buf;
     }
 
     // Emit If Available - submit always
@@ -198,15 +212,17 @@ public class ParallelGZIPOutputStream extends FilterOutputStream {
     // Master thread only
     private void tryEmit() throws IOException, InterruptedException, ExecutionException {
         for (;;) {
-            Future<byte[]> future = emitQueue.peek();
+            Future<Block> future = emitQueue.peek();
             // LOG.info("Peeked future " + future);
             if (future == null)
                 return;
             if (!future.isDone())
                 return;
             // It's an ordered queue. This MUST be the same element as above.
-            emitQueue.remove();
-            out.write(future.get());
+            Block b = emitQueue.remove().get();
+            out.write(b.buf, 0, b.buf_length);
+            b.buf_length = 0;
+            blocks.add(b);
         }
     }
 
@@ -216,8 +232,10 @@ public class ParallelGZIPOutputStream extends FilterOutputStream {
         try {
             while (emitQueue.size() > taskCountAllowed) {
                 // LOG.info("Waiting for taskCount=" + emitQueue.size() + " -> " + taskCountAllowed);
-                Future<byte[]> future = emitQueue.remove(); // Valid because emitQueue.size() > 0
-                out.write(future.get());  // Blocks until this task is done.
+                Block b = emitQueue.remove().get();  // Valid because emitQueue.size() > 0
+                out.write(b.buf, 0, b.buf_length);  // Blocks until this task is done.
+                b.buf_length = 0;
+                blocks.add(b);
             }
             // We may have achieved more opportunistically available blocks
             // while waiting for a block above. Let's emit them here.
@@ -233,7 +251,7 @@ public class ParallelGZIPOutputStream extends FilterOutputStream {
     @Override
     public void flush() throws IOException {
         // LOG.info("Flush: " + block);
-        if (block.in_length > 0)
+        if (block.buf_length > 0)
             submit();
         emitUntil(0);
         super.flush();
@@ -252,7 +270,7 @@ public class ParallelGZIPOutputStream extends FilterOutputStream {
             buf.order(ByteOrder.LITTLE_ENDIAN);
             // LOG.info("CRC is " + crc.getValue());
             buf.putInt((int) crc.getValue());
-            buf.putInt(bytesWritten);
+            buf.putInt((int) (bytesWritten % 4294967296L));
             out.write(buf.array()); // allocate() guarantees a backing array.
             // LOG.info("trailer is " + Arrays.toString(buf.array()));
 
@@ -262,6 +280,8 @@ public class ParallelGZIPOutputStream extends FilterOutputStream {
             bytesWritten = Integer.MIN_VALUE;
             // } else {
             // LOG.warn("Already closed.");
+
+            blocks.clear();
         }
     }
 }
