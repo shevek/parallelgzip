@@ -93,8 +93,8 @@ public class ParallelGZIPOutputStream extends FilterOutputStream {
     }
     // TODO: Share, daemonize.
     private final ExecutorService executor;
-    private final int nthreads;
     private final CRC32 crc = new CRC32();
+    private final int emitQueueSize;
     private final BlockingQueue<Future<byte[]>> emitQueue;
     private Block block = new Block(/* 0 */);
     /** Used as a sentinel for 'closed'. */
@@ -104,8 +104,9 @@ public class ParallelGZIPOutputStream extends FilterOutputStream {
     public ParallelGZIPOutputStream(@Nonnull OutputStream out, @Nonnull ExecutorService executor, @Nonnegative int nthreads) throws IOException {
         super(out);
         this.executor = executor;
-        this.nthreads = nthreads;
-        this.emitQueue = new ArrayBlockingQueue<Future<byte[]>>(nthreads);
+        // Some blocks compress faster than others; allow a long enough queue to keep all CPUs busy at least for a bit.
+        this.emitQueueSize = nthreads * 3;
+        this.emitQueue = new ArrayBlockingQueue<Future<byte[]>>(emitQueueSize);
         writeHeader();
     }
 
@@ -187,7 +188,7 @@ public class ParallelGZIPOutputStream extends FilterOutputStream {
 
     // Master thread only
     private void submit() throws IOException {
-        emitUntil(nthreads - 1);
+        emitUntil(emitQueueSize - 1);
         emitQueue.add(executor.submit(block));
         block = new Block(/* block.index + 1 */);
     }
