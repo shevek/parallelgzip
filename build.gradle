@@ -1,5 +1,14 @@
 buildscript {
-    apply from: file('gradle/buildscript.gradle'), to: buildscript 
+	repositories {
+		mavenLocal()
+		mavenCentral()
+		jcenter()
+		// maven { url 'https://oss.sonatype.org/content/repositories/snapshots/' }
+	}
+
+	dependencies {
+		classpath 'org.anarres.gradle:gradle-stdproject-plugin:1.0.8'
+	}
 }
 
 apply plugin: 'org.anarres.stdproject'
@@ -25,6 +34,6 @@ stdproject {
 	}
 
 dependencies {
-	compile 'com.google.code.findbugs:annotations:2.0.3'
+	compile 'com.google.code.findbugs:annotations:3.0.1'
 	testCompile 'com.google.guava:guava:18.0'
 }
