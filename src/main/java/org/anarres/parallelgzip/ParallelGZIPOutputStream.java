@@ -98,7 +98,7 @@ public class ParallelGZIPOutputStream extends FilterOutputStream {
     private final BlockingQueue<Future<byte[]>> emitQueue;
     private Block block = new Block(/* 0 */);
     /** Used as a sentinel for 'closed'. */
-    private int bytesWritten = 0;
+    private long bytesWritten = 0;
 
     // Master thread only
     public ParallelGZIPOutputStream(@Nonnull OutputStream out, @Nonnull ExecutorService executor, @Nonnegative int nthreads) throws IOException {
@@ -253,7 +253,7 @@ public class ParallelGZIPOutputStream extends FilterOutputStream {
             buf.order(ByteOrder.LITTLE_ENDIAN);
             // LOG.info("CRC is " + crc.getValue());
             buf.putInt((int) crc.getValue());
-            buf.putInt(bytesWritten);
+            buf.putInt((int) (bytesWritten % 4294967296L));
             out.write(buf.array()); // allocate() guarantees a backing array.
             // LOG.info("trailer is " + Arrays.toString(buf.array()));
 
