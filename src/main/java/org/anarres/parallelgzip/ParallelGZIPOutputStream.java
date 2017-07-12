@@ -4,25 +4,17 @@
  */
 package org.anarres.parallelgzip;
 
-import java.io.ByteArrayOutputStream;
-import java.io.FilterOutputStream;
-import java.io.IOException;
-import java.io.InterruptedIOException;
-import java.io.OutputStream;
+import javax.annotation.Nonnegative;
+import javax.annotation.Nonnull;
+import java.io.*;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Future;
+import java.util.ArrayList;
+import java.util.concurrent.*;
 import java.util.zip.CRC32;
 import java.util.zip.Deflater;
 import java.util.zip.DeflaterOutputStream;
 import java.util.zip.GZIPOutputStream;
-import javax.annotation.Nonnegative;
-import javax.annotation.Nonnull;
 
 /**
  * A multi-threaded version of {@link GZIPOutputStream}.
@@ -32,7 +24,8 @@ import javax.annotation.Nonnull;
 public class ParallelGZIPOutputStream extends FilterOutputStream {
 
     // private static final Logger LOG = LoggerFactory.getLogger(ParallelGZIPOutputStream.class);
-    private final static int GZIP_MAGIC = 0x8b1f;
+    private static final int GZIP_MAGIC = 0x8b1f;
+    private static final int SIZE = 64 * 1024;
 
     @Nonnull
     private static Deflater newDeflater() {
@@ -44,25 +37,35 @@ public class ParallelGZIPOutputStream extends FilterOutputStream {
         return new DeflaterOutputStream(out, deflater, 512, true);
     }
 
-    private static class Block implements Callable<byte[]> {
+    private static class State {
+        private final Deflater def = newDeflater();
+        private final ByteArrayOutputStreamExposed buf = new ByteArrayOutputStreamExposed(SIZE);
+        private final DeflaterOutputStream str = newDeflaterOutputStream(buf, def);
+    }
 
-        private static class State {
-
-            private final Deflater def = newDeflater();
-            private final ByteArrayOutputStream buf = new ByteArrayOutputStream(SIZE);
-            private final DeflaterOutputStream str = newDeflaterOutputStream(buf, def);
+    /** This ThreadLocal avoids the recycling of a lot of memory, causing lumpy performance. */
+    private static final ThreadLocal<State> STATE = new ThreadLocal<State>() {
+        @Override
+        protected State initialValue() {
+            return new State();
         }
-        /** This ThreadLocal avoids the recycling of a lot of memory, causing lumpy performance. */
-        private static final ThreadLocal<State> STATE = new ThreadLocal<State>() {
-            @Override
-            protected State initialValue() {
-                return new State();
-            }
-        };
-        public static final int SIZE = 64 * 1024;
+    };
+
+    /* Allow write into byte[] directly */
+    private static class ByteArrayOutputStreamExposed extends ByteArrayOutputStream {
+        private ByteArrayOutputStreamExposed(int size) {
+            super(size);
+        }
+
+        private void writeTo(byte[] buf) {
+            System.arraycopy(this.buf, 0, buf, 0, count);
+        }
+    }
+
+    private static class Block implements Callable<Block> {
         // private final int index;
-        private final byte[] in = new byte[SIZE];
-        private int in_length = 0;
+        private final byte[] buf = new byte[SIZE * 2];
+        private int bufLength = 0;
 
         /*
          public Block(@Nonnegative int index) {
@@ -71,7 +74,7 @@ public class ParallelGZIPOutputStream extends FilterOutputStream {
          */
         // Only on worker thread
         @Override
-        public byte[] call() throws Exception {
+        public Block call() throws IOException {
             // LOG.info("Processing " + this + " on " + Thread.currentThread());
 
             State state = STATE.get();
@@ -79,24 +82,30 @@ public class ParallelGZIPOutputStream extends FilterOutputStream {
             // DeflaterOutputStream def = newDeflaterOutputStream(buf);
             state.def.reset();
             state.buf.reset();
-            state.str.write(in, 0, in_length);
+            state.str.write(buf, 0, bufLength);
             state.str.flush();
 
+            bufLength = state.buf.size();
+            assert bufLength <= buf.length;
+            state.buf.writeTo(buf);
+
             // return Arrays.copyOf(in, in_length);
-            return state.buf.toByteArray();
+            return this;
         }
 
         @Override
         public String toString() {
-            return "Block" /* + index */ + "(" + in_length + "/" + in.length + " bytes)";
+            return "Block" /* + index */ + "(" + bufLength + "/" + buf.length + " bytes)";
         }
     }
     // TODO: Share, daemonize.
     private final ExecutorService executor;
+    private final int nthreads;
     private final CRC32 crc = new CRC32();
-    private final int emitQueueSize;
-    private final BlockingQueue<Future<byte[]>> emitQueue;
-    private Block block = new Block(/* 0 */);
+    private final BlockingQueue<Future<Block>> emitQueue;
+    private ArrayList<Block> blocks = new ArrayList<>();  // list of reusable blocks
+    private Block block = new Block();
+    private byte[] blockBuf = block.buf;
     /** Used as a sentinel for 'closed'. */
     private long bytesWritten = 0;
 
@@ -104,9 +113,8 @@ public class ParallelGZIPOutputStream extends FilterOutputStream {
     public ParallelGZIPOutputStream(@Nonnull OutputStream out, @Nonnull ExecutorService executor, @Nonnegative int nthreads) throws IOException {
         super(out);
         this.executor = executor;
-        // Some blocks compress faster than others; allow a long enough queue to keep all CPUs busy at least for a bit.
-        this.emitQueueSize = nthreads * 3;
-        this.emitQueue = new ArrayBlockingQueue<Future<byte[]>>(emitQueueSize);
+        this.nthreads = nthreads;
+        this.emitQueue = new ArrayBlockingQueue<Future<Block>>(nthreads);
         writeHeader();
     }
 
@@ -169,16 +177,16 @@ public class ParallelGZIPOutputStream extends FilterOutputStream {
         bytesWritten += len;
         while (len > 0) {
             // assert block.in_length < block.in.length
-            int capacity = block.in.length - block.in_length;
+            int capacity = SIZE - block.bufLength;
             if (len >= capacity) {
-                System.arraycopy(b, off, block.in, block.in_length, capacity);
-                block.in_length += capacity;   // == block.in.length
+                System.arraycopy(b, off, blockBuf, block.bufLength, capacity);
+                block.bufLength += capacity;   // == block.in.length
                 off += capacity;
                 len -= capacity;
                 submit();
             } else {
-                System.arraycopy(b, off, block.in, block.in_length, len);
-                block.in_length += len;
+                System.arraycopy(b, off, blockBuf, block.bufLength, len);
+                block.bufLength += len;
                 // off += len;
                 // len = 0;
                 break;
@@ -188,9 +196,10 @@ public class ParallelGZIPOutputStream extends FilterOutputStream {
 
     // Master thread only
     private void submit() throws IOException {
-        emitUntil(emitQueueSize - 1);
+        emitUntil(nthreads - 1);
         emitQueue.add(executor.submit(block));
-        block = new Block(/* block.index + 1 */);
+        block = blocks.isEmpty() ? new Block() : blocks.remove(blocks.size() - 1);
+        blockBuf = block.buf;
     }
 
     // Emit If Available - submit always
@@ -199,15 +208,17 @@ public class ParallelGZIPOutputStream extends FilterOutputStream {
     // Master thread only
     private void tryEmit() throws IOException, InterruptedException, ExecutionException {
         for (;;) {
-            Future<byte[]> future = emitQueue.peek();
+            Future<Block> future = emitQueue.peek();
             // LOG.info("Peeked future " + future);
             if (future == null)
                 return;
             if (!future.isDone())
                 return;
             // It's an ordered queue. This MUST be the same element as above.
-            emitQueue.remove();
-            out.write(future.get());
+            Block b = emitQueue.remove().get();
+            out.write(b.buf, 0, b.bufLength);
+            b.bufLength = 0;
+            blocks.add(b);
         }
     }
 
@@ -217,8 +228,10 @@ public class ParallelGZIPOutputStream extends FilterOutputStream {
         try {
             while (emitQueue.size() > taskCountAllowed) {
                 // LOG.info("Waiting for taskCount=" + emitQueue.size() + " -> " + taskCountAllowed);
-                Future<byte[]> future = emitQueue.remove(); // Valid because emitQueue.size() > 0
-                out.write(future.get());  // Blocks until this task is done.
+                Block b = emitQueue.remove().get();  // Valid because emitQueue.size() > 0
+                out.write(b.buf, 0, b.bufLength);  // Blocks until this task is done.
+                b.bufLength = 0;
+                blocks.add(b);
             }
             // We may have achieved more opportunistically available blocks
             // while waiting for a block above. Let's emit them here.
@@ -234,7 +247,7 @@ public class ParallelGZIPOutputStream extends FilterOutputStream {
     @Override
     public void flush() throws IOException {
         // LOG.info("Flush: " + block);
-        if (block.in_length > 0)
+        if (block.bufLength > 0)
             submit();
         emitUntil(0);
         super.flush();
@@ -263,6 +276,8 @@ public class ParallelGZIPOutputStream extends FilterOutputStream {
             bytesWritten = Integer.MIN_VALUE;
             // } else {
             // LOG.warn("Already closed.");
+
+            blocks.clear();
         }
     }
 }
