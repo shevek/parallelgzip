@@ -17,6 +17,7 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.zip.CRC32;
 import java.util.zip.Deflater;
 import java.util.zip.DeflaterOutputStream;
@@ -32,7 +33,7 @@ import javax.annotation.Nonnull;
 public class ParallelGZIPOutputStream extends FilterOutputStream {
 
     // private static final Logger LOG = LoggerFactory.getLogger(ParallelGZIPOutputStream.class);
-    private final static int GZIP_MAGIC = 0x8b1f;
+    private static final int GZIP_MAGIC = 0x8b1f;
 
     @Nonnull
     private static Deflater newDeflater() {
@@ -49,7 +50,7 @@ public class ParallelGZIPOutputStream extends FilterOutputStream {
         private static class State {
 
             private final Deflater def = newDeflater();
-            private final ByteArrayOutputStream buf = new ByteArrayOutputStream(SIZE);
+            private final ByteArrayOutputStream buf = new ByteArrayOutputStream(SIZE + (SIZE >> 2));
             private final DeflaterOutputStream str = newDeflaterOutputStream(buf, def);
         }
         /** This ThreadLocal avoids the recycling of a lot of memory, causing lumpy performance. */
@@ -91,6 +92,14 @@ public class ParallelGZIPOutputStream extends FilterOutputStream {
             return "Block" /* + index */ + "(" + in_length + "/" + in.length + " bytes)";
         }
     }
+
+    @Nonnegative
+    private static int getThreadCount(@Nonnull ExecutorService executor) {
+        if (executor instanceof ThreadPoolExecutor)
+            return ((ThreadPoolExecutor)executor).getMaximumPoolSize();
+        return Runtime.getRuntime().availableProcessors();
+    }
+
     // TODO: Share, daemonize.
     private final ExecutorService executor;
     private final CRC32 crc = new CRC32();
@@ -101,6 +110,7 @@ public class ParallelGZIPOutputStream extends FilterOutputStream {
     private long bytesWritten = 0;
 
     // Master thread only
+    @Deprecated // Doesn't really use the given number of threads.
     public ParallelGZIPOutputStream(@Nonnull OutputStream out, @Nonnull ExecutorService executor, @Nonnegative int nthreads) throws IOException {
         super(out);
         this.executor = executor;
@@ -117,8 +127,13 @@ public class ParallelGZIPOutputStream extends FilterOutputStream {
      * @param out the eventual output stream for the compressed data.
      * @throws IOException if it all goes wrong.
      */
+    @Deprecated // Doesn't really use the given number of threads.
     public ParallelGZIPOutputStream(@Nonnull OutputStream out, @Nonnegative int nthreads) throws IOException {
         this(out, ParallelGZIPEnvironment.getSharedThreadPool(), nthreads);
+    }
+
+    public ParallelGZIPOutputStream(@Nonnull OutputStream out, @Nonnull ExecutorService executor) throws IOException {
+        this(out, executor, getThreadCount(executor));
     }
 
     /**

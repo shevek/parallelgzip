@@ -7,6 +7,7 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import javax.annotation.Nonnegative;
 import javax.annotation.Nonnull;
 
 /**
@@ -15,33 +16,36 @@ import javax.annotation.Nonnull;
  */
 public class ParallelGZIPEnvironment {
 
+    private static class ThreadFactoryHolder {
+
+        private static final ThreadFactory THREAD_FACTORY = new ThreadFactory() {
+            private final ThreadFactory defaultThreadFactory = Executors.defaultThreadFactory();
+            private final AtomicLong counter = new AtomicLong(0);
+
+            @Override
+            public Thread newThread(@Nonnull Runnable r) {
+                Thread thread = defaultThreadFactory.newThread(r);
+                thread.setName("parallelgzip-" + counter.getAndIncrement());
+                thread.setDaemon(true);
+                return thread;
+            }
+        };
+    }
+
+    @Nonnull
+    public static ThreadPoolExecutor newThreadPoolExecutor(@Nonnegative int nthreads) {
+        ThreadPoolExecutor executor = new ThreadPoolExecutor(nthreads, nthreads,
+                1L, TimeUnit.SECONDS,
+                new ArrayBlockingQueue<Runnable>(nthreads * 20),
+                ThreadFactoryHolder.THREAD_FACTORY,
+                new ThreadPoolExecutor.CallerRunsPolicy());
+        executor.allowCoreThreadTimeOut(true);
+        return executor;
+    }
+
     private static class ThreadPoolHolder {
 
-        private static final ExecutorService EXECUTOR;
-
-        static {
-            ThreadFactory threadFactory = new ThreadFactory() {
-                private final ThreadFactory defaultThreadFactory = Executors.defaultThreadFactory();
-                private final AtomicLong counter = new AtomicLong(0);
-
-                @Override
-                public Thread newThread(@Nonnull Runnable r) {
-                    Thread thread = defaultThreadFactory.newThread(r);
-                    thread.setName("parallelgzip-" + counter.getAndIncrement());
-                    thread.setDaemon(true);
-                    return thread;
-                }
-            };
-            // int nthreads = Math.max(Runtime.getRuntime().availableProcessors() - 1, 1);
-            int nthreads = Runtime.getRuntime().availableProcessors();
-            ThreadPoolExecutor executor = new ThreadPoolExecutor(nthreads, nthreads,
-                    1L, TimeUnit.SECONDS,
-                    new ArrayBlockingQueue<Runnable>(nthreads * 20),
-                    threadFactory,
-                    new ThreadPoolExecutor.CallerRunsPolicy());
-            executor.allowCoreThreadTimeOut(true);
-            EXECUTOR = executor;
-        }
+        private static final ExecutorService EXECUTOR = newThreadPoolExecutor(Runtime.getRuntime().availableProcessors());
     }
 
     @Nonnull
