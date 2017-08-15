@@ -28,7 +28,7 @@ public class ParallelGZIPPerformanceTest {
     public void testThreads() throws Exception {
         LOG.info("AvailableProcessors = " + Runtime.getRuntime().availableProcessors());
         Random r = new Random();
-        byte[] data = new byte[1024 * 1024];
+        byte[] data = new byte[10 * 1024 * 1024];
         r.nextBytes(data);
         for (int i = 0; i < data.length; i++)
             data[i] = (byte) (data[i] & 0x7f);  // Strip the top bit to make it amenable to Huffman compression.
@@ -37,7 +37,8 @@ public class ParallelGZIPPerformanceTest {
         ParallelGZIPOutputStream gzip = new ParallelGZIPOutputStream(out);
         Stopwatch stopwatch = Stopwatch.createStarted();
 
-        for (int i = 0; i < 1024 * 20; i++) {
+        for (int i = 0; i < 1024; i++) {
+            LOG.debug("Write iteration " + i);
             gzip.write(data);
         }
         gzip.close();
