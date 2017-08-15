@@ -14,7 +14,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.zip.GZIPOutputStream;
 import javax.annotation.Nonnegative;
 import javax.annotation.Nonnull;
-import org.junit.Ignore;
 import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,7 +29,7 @@ public class ParallelGZIPOutputStreamTest {
 
     private static class ByteArrayOutputBuffer extends ByteArrayOutputStream {
 
-        public ByteArrayOutputBuffer(int size) {
+        public ByteArrayOutputBuffer(@Nonnegative int size) {
             super(size);
         }
 
