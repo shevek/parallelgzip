@@ -128,8 +128,8 @@ public class ParallelGZIPOutputStream extends FilterOutputStream {
     private final CRC32 crc = new CRC32();
     private final int emitQueueSize;
     private final BlockingQueue<Future<Block>> emitQueue;
-    private final Deque<Block> freeBlocks = new ArrayDeque<>();  // list of reusable blocks
     private Block block = new Block();
+    private Block freeBlock = null;
     /** Used as a sentinel for 'closed'. */
     private long bytesWritten = 0;
 
@@ -231,8 +231,10 @@ public class ParallelGZIPOutputStream extends FilterOutputStream {
     private void submit() throws IOException {
         emitUntil(emitQueueSize - 1);
         emitQueue.add(executor.submit(block));
-        Block b = freeBlocks.pollLast();
-        if (b == null)
+        Block b = freeBlock;
+        if (b != null)
+            freeBlock = null;
+        else
             b = new Block();
         block = b;
     }
@@ -254,7 +256,7 @@ public class ParallelGZIPOutputStream extends FilterOutputStream {
             // System.out.println("Chance-emitting block " + b);
             out.write(b.buf, 0, b.buf_length);
             b.buf_length = 0;
-            freeBlocks.addLast(b);
+            freeBlock = b;
         }
     }
 
@@ -268,7 +270,7 @@ public class ParallelGZIPOutputStream extends FilterOutputStream {
                 // System.out.println("Force-emitting block " + b);
                 out.write(b.buf, 0, b.buf_length);  // Blocks until this task is done.
                 b.buf_length = 0;
-                freeBlocks.addLast(b);
+                freeBlock = b;
             }
             // We may have achieved more opportunistically available blocks
             // while waiting for a block above. Let's emit them here.
@@ -314,7 +316,8 @@ public class ParallelGZIPOutputStream extends FilterOutputStream {
             // } else {
             // LOG.warn("Already closed.");
 
-            freeBlocks.clear();
+            block = null;
+            freeBlock = null;
         } else {
             System.out.println("No bytes written: Not finishing.");
         }
