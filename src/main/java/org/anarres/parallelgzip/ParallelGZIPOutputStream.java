@@ -11,8 +11,6 @@ import java.io.InterruptedIOException;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.util.ArrayDeque;
-import java.util.Deque;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Callable;
@@ -24,6 +22,7 @@ import java.util.zip.CRC32;
 import java.util.zip.Deflater;
 import java.util.zip.DeflaterOutputStream;
 import java.util.zip.GZIPOutputStream;
+import javax.annotation.CheckForNull;
 import javax.annotation.Nonnegative;
 import javax.annotation.Nonnull;
 
@@ -128,7 +127,9 @@ public class ParallelGZIPOutputStream extends FilterOutputStream {
     private final CRC32 crc = new CRC32();
     private final int emitQueueSize;
     private final BlockingQueue<Future<Block>> emitQueue;
+    @Nonnull
     private Block block = new Block();
+    @CheckForNull
     private Block freeBlock = null;
     /** Used as a sentinel for 'closed'. */
     private long bytesWritten = 0;
@@ -316,10 +317,7 @@ public class ParallelGZIPOutputStream extends FilterOutputStream {
             // } else {
             // LOG.warn("Already closed.");
 
-            block = null;
             freeBlock = null;
-        } else {
-            System.out.println("No bytes written: Not finishing.");
         }
     }
 }
