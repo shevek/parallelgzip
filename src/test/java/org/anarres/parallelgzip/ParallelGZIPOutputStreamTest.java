@@ -47,22 +47,28 @@ public class ParallelGZIPOutputStreamTest {
 
         ByteArrayOutputBuffer out = new ByteArrayOutputBuffer(data.length);    // Reallocation will occur on the first iteration.
 
-        final int serialCount = 5;
+        final int serialCount = 10;
         long serialTotal = 0;
-        for (int i = 0; i < serialCount; i++) {
+        for (int i = -2; i < serialCount; i++) {
             out.reset();
             Stopwatch stopwatch = Stopwatch.createStarted();
             GZIPOutputStream gzip = new GZIPOutputStream(out);
             gzip.write(data);
             gzip.close();
             gzip.close();   // Again, for testing.
-            long orig = stopwatch.elapsed(TimeUnit.MILLISECONDS);
-            serialTotal += orig;
-            LOG.info("size=" + data.length + "; serial=" + orig);
+            long elapsed = stopwatch.elapsed(TimeUnit.MILLISECONDS);
+            LOG.info("i=" + i + ", size=" + data.length + "; serial=" + elapsed);
+            if (i < 0)
+                continue;
+            serialTotal += elapsed;
         }
 
         double serialTime = serialTotal / (double) serialCount;
-        for (int i = 0; i < 20; i++) {
+        LOG.info("size=" + data.length + "; serialavg=" + (long) serialTime);
+
+        final int parallelCount = 25;
+        long parallelTotal = 0;
+        for (int i = -2; i < parallelCount; i++) {
             out.reset();
             Stopwatch stopwatch = Stopwatch.createStarted();
             ParallelGZIPOutputStream gzip = new ParallelGZIPOutputStream(out);
@@ -70,8 +76,14 @@ public class ParallelGZIPOutputStreamTest {
             gzip.close();
             long elapsed = stopwatch.elapsed(TimeUnit.MILLISECONDS);
             double perc = serialTime * 100d / elapsed;
-            LOG.info("size=" + data.length + "; parallel=" + elapsed + "; perf=" + (int) perc + "%");
+            LOG.info("i=" + i + ", size=" + data.length + "; parallel=" + elapsed + "; perf=" + (int) perc + "%");
+            if (i < 0)
+                continue;
+            parallelTotal += elapsed;
         }
+
+        double parallelTime = parallelTotal / (double) parallelCount;
+        LOG.info("size=" + data.length + "; parallelavg=" + (long) parallelTime);
 
         ParallelGZIPInputStream in = new ParallelGZIPInputStream(out.toInput());
         byte[] copy = ByteStreams.toByteArray(in);
