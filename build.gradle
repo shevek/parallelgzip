@@ -1,13 +1,14 @@
 buildscript {
 	repositories {
-		mavenLocal()
+		// mavenLocal()
 		mavenCentral()
-		jcenter()
+		// jcenter()
 		// maven { url 'https://oss.sonatype.org/content/repositories/snapshots/' }
+		gradlePluginPortal()
 	}
 
 	dependencies {
-		classpath 'org.anarres.gradle:gradle-stdproject-plugin:1.0.8'
+		classpath 'org.anarres.gradle:gradle-stdproject-plugin:1.0.10'
 	}
 }
 
@@ -28,10 +29,10 @@ stdproject {
 	// syncFlush option on DeflaterOutputStream is only
 	// available in 1.7.
 	sourceCompatibility = 1.7
-	animalsniffer {
-		signature = "org.codehaus.mojo.signature:java17:+@signature"
-		skip = true
-	}
+//	animalsniffer {
+//		signature = "org.codehaus.mojo.signature:java17:+@signature"
+//		skip = true
+//	}
 
 dependencies {
 	compile 'com.google.code.findbugs:annotations:3.0.1'
