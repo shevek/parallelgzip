@@ -53,7 +53,7 @@ public class ParallelGZIPOutputStream extends FilterOutputStream {
             super(size);
         }
 
-        public void writeTo(@Nonnull byte[] buf) throws IOException {
+        public void writeTo(@Nonnull byte[] buf) {
             System.arraycopy(this.buf, 0, buf, 0, count);
         }
     }
@@ -231,12 +231,8 @@ public class ParallelGZIPOutputStream extends FilterOutputStream {
     private void submit() throws IOException {
         emitUntil(emitQueueSize - 1);
         emitQueue.add(executor.submit(block));
-        Block b = freeBlock;
-        if (b != null)
-            freeBlock = null;
-        else
-            b = new Block();
-        block = b;
+        block = freeBlock == null ? new Block() : freeBlock;
+        freeBlock = null;
     }
 
     // Emit If Available - submit always
