@@ -230,7 +230,7 @@ public class ParallelGZIPOutputStream extends FilterOutputStream {
     // Master thread only
     private void submit() throws IOException {
         emitUntil(emitQueueSize - 1);
-        emitQueue.add(executor.submit(block));
+        emitQueue.put(executor.submit(block));
         Block b = freeBlock;
         if (b != null)
             freeBlock = null;
